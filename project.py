@@ -10,18 +10,23 @@ from pytesseract import pytesseract
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.alert import Alert
 from selenium.webdriver.support.select import Select
-from selenium.common.exceptions import NoAlertPresentException, InvalidSessionIdException
+from selenium.common.exceptions import (
+    NoAlertPresentException,
+    InvalidSessionIdException,
+    UnexpectedAlertPresentException
+)
 
 # find the link of capcha from source code
 
 
 def find_src(source_code):
     HtmlCodeInListForm = source_code.split(" ")
-    captcha_img_link = []
+
     for i in HtmlCodeInListForm:
         if 'src="CaptchaImage.axd?guid=' in i:
-            captcha_img_link.append(i[5:-1])
-    return captcha_img_link[0]
+            return i[5:-1]
+
+    return None
 
 #  after getting link of captcha image this function download the captcha image
 
@@ -41,7 +46,7 @@ def download_image(url, image_name):
 
 def read_text(captcha_image):
     # path of tesseract.exe
-    path_to_tesseract = r"E://Program Files//Tesseract-OCR//tesseract.exe"
+    path_to_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     # image_path = r"./{captcha_image}"
     image_path = captcha_image
     img = Image.open(image_path)
@@ -59,21 +64,59 @@ def read_text(captcha_image):
     # delete image
     os.remove(captcha_image)
     return captcha
+def get_next_enrollment(filename, prefix, start_number):
+    """
+    Find the next enrollment number that should be scraped.
+    """
+    if not os.path.exists(filename):
+        return start_number
 
+    highest = start_number - 1
+
+    with open(filename, 'r') as f:
+        for line in f:
+            line = line.strip()
+
+            if not line:
+                continue
+
+            parts = line.split(',')
+
+            if not parts:
+                continue
+
+            enrollment = parts[0].strip()
+
+            if enrollment.startswith(prefix):
+                try:
+                    number = int(enrollment[len(prefix):])
+
+                    if number > highest:
+                        highest = number
+
+                except ValueError:
+                    pass
+
+    return highest + 1
 
 def main():
 
-    i = 1001  # starting rollnumber
+    i = 1001 # starting rollnumber
+    start_enrollment = 1001
+    end_enrollment = 1500
     k = 0  # To close the program when all results are found
-    print("1. Computer Science")
-    print("2. Mechnical Engineering")
-    print("3. Civil Engineering")
-    print("4. Electrical Engineering")
+    print("1. AIML")
+    print("2. AIDS")
+    print("3. CSE")
+    print("4. Civil")
+    print("5. Electrical")
+    print("6. Mechanical")
+    print("7. Electronics")
     branch = input("Enter Branch Number: ")
 
     # sem = input("Enter semester: ")
-    sem = "7"
-    print("Semester is:7")
+    sem = "6"
+    print("Semester is:6")
 
     # When user enter a wrong branch number
     try:
@@ -86,28 +129,32 @@ def main():
     # set roll number
     # Check user's input and set roll number accordingly
     if j == 1:
-        en_num = "0967CS20"
+        en_num = "0103CE23"
         print("Your Starting Roll Number: ", en_num+str(i))
         input("Press Enter")
-        filename = f'CS_{sem}thsem_result.csv'
+        filename = f'CE_{sem}thsem_result.csv'
     elif j == 2:
-        en_num = "0967ME20"
+        en_num = "0103CS24"
         print("Your Starting Roll Number: ", en_num+str(i))
         input("Press Enter")
         filename = f'ME_{sem}thsem_result.csv'
     elif j == 3:
-        en_num = "0967CE20"
+        en_num = "0103AD24"
         print("Your Starting Roll Number: ", en_num+str(i))
         input("Press Enter")
         filename = f'CE_{sem}thsem_result.csv'
     elif j == 4:
-        en_num = "0967EX20"
+        en_num = "0103EX24"
         print("Your Starting Roll Number: ", en_num+str(i))
         input("Press Enter")
         filename = f'EX_{sem}thsem_result.csv'
     else:
         # when branch is wrong
         sys.exit("branch do not match")
+    # Resume automatically
+    i = get_next_enrollment(filename, en_num, i)
+
+    print("Resuming from enrollment:", en_num + str(i))
 
     # open drive
     # path of chromedriver.exe
@@ -125,12 +172,23 @@ def main():
     driver.get("http://result.rgpv.ac.in/Result/ProgramSelect.aspx")
     radio = driver.find_element_by_id("radlstProgram_1")
     radio.click()
-    while True:
+    print("Current URL:", driver.current_url)
+
+    captcha_elements = driver.find_elements(
+    "xpath",
+    "//img[contains(@src, 'Captcha')]"
+    )
+
+    print("Captcha images found:", len(captcha_elements))
+
+    for element in captcha_elements:
+         print("CAPTCHA SRC:", element.get_attribute("src"))
+    while i<=end_enrollment:
         # set rollnumber
 
         en_num_format = en_num+str(i)
         # when roll number limit is reached
-        if k > 4:
+        if k > 9:
             break
         print(en_num+str(i))
 
@@ -139,9 +197,22 @@ def main():
 
         # get page source
         s = driver.page_source
+        print("Current URL:", driver.current_url)
+
+        with open("page_source.html", "w", encoding="utf-8") as f:
+           f.write(s)
+
+        print("Page source saved to page_source.html")
 
         # functions
         link = find_src(s)
+
+        if link is None:
+          print("CAPTCHA not found. Refreshing page...")
+          driver.refresh()
+          time.sleep(1)
+          continue
+
         url = f'http://result.rgpv.ac.in/result/{link}'
         download_image(url, image)
         captcha = read_text(image)
@@ -161,14 +232,26 @@ def main():
 
         # handel alert, when captcha is wrong and enrollment number is not found
         time.sleep(2)
-        alert = Alert(driver)
+        alerttext = ""
+
         try:
-            alerttext = alert.text
-            alert.accept()
+           alert = driver.switch_to.alert
+           alerttext = alert.text
+           print("RGPV Alert:", alerttext)
+           alert.accept()
+           time.sleep(0.5)
+
         except NoAlertPresentException:
             pass
-        except InvalidSessionIdException:
-            pass
+
+        except UnexpectedAlertPresentException:
+            try:
+              alert = driver.switch_to.alert
+              alerttext = alert.text
+              print("RGPV Alert:", alerttext)
+              alert.accept()
+            except NoAlertPresentException:
+              pass
         s = driver.page_source
 
         # when captcha is correct featch from result page
@@ -190,9 +273,23 @@ def main():
                            ",", sgpa, ",", cgpa, ",", result, "\n"]
 
             # write result in CSV file
-            with open(filename, 'a') as f:
-                f.writelines(information)
-            f.close()
+            # Check whether this enrollment already exists
+            duplicate = False
+
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                  for line in f:
+                     if line.startswith(roll_nu + ","):
+                        duplicate = True
+                        break
+
+            if not duplicate:
+                with open(filename, 'a') as f:
+                    f.writelines(information)
+
+                print("Successful - saved:", roll_nu)
+            else:
+                 print("Duplicate skipped:", roll_nu)
             print("succesful")
             # Press reset information button
             driver.find_element_by_xpath(
